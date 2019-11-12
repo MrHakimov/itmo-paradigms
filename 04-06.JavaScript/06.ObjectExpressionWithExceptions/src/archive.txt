@@ -1,0 +1,401 @@
+function Operation() {
+    this.operands = arguments;
+}
+
+Operation.prototype.evaluate = function () {
+    let result = [];
+    for (let i = 0; i < this.operands.length; i++) {
+        result.push(this.operands[i].evaluate.apply(this.operands[i], arguments));
+    }
+    return this.calc.apply(null, result);
+};
+
+Operation.prototype.diff = function (name) {
+    let result = [];
+    for (let i = 0; i < this.operands.length; i++) {
+        let operand = this.operands[i];
+        result.push(operand);
+        result.push(operand.diff(name));
+    }
+    return this.calcDiff.apply(null, result);
+};
+
+Operation.prototype.postfix = Operation.prototype.toString = function () {
+    let result = '(';
+    for (let i = 0; i < this.operands.length; i++) {
+        result = result.concat(this.operands[i].postfix().concat(' '));
+    }
+    result = result.concat(this.operation.concat(')'));
+    return result;
+};
+
+Operation.prototype.prefix = function () {
+    let result = '('.concat(this.operation);
+    for (let i = 0; i < this.operands.length; i++) {
+        result = result.concat(' '.concat(this.operands[i].prefix()));
+    }
+    result = result.concat(')');
+    return result;
+};
+
+function GenerateOperation(operation, functionCalc, functionCalcDiff) {
+    function Constructor() {
+        let args = arguments;
+        Operation.apply(this, args);
+    }
+
+    let currentPrototype = Object.create(Operation.prototype);
+    currentPrototype.constructor = Constructor;
+    currentPrototype.operation = operation;
+    currentPrototype.calc = functionCalc;
+    currentPrototype.calcDiff = functionCalcDiff;
+
+    Constructor.prototype = currentPrototype;
+    return Constructor;
+}
+
+function Const(value) {
+    this.value = value;
+}
+
+Const.prototype.evaluate = function () {
+    return this.value;
+};
+
+Const.prototype.diff = function () {
+    return ZERO;
+};
+
+Const.prototype.postfix = Const.prototype.prefix = Const.prototype.toString = function () {
+    return this.value.toString();
+};
+
+let ONE = new Const(1);
+let ZERO = new Const(0);
+
+let VARIABLES = ['x', 'y', 'z'];
+
+function Variable(name) {
+    this.index = VARIABLES.indexOf(name);
+}
+
+Variable.prototype.evaluate = function () {
+    return arguments[this.index];
+};
+
+Variable.prototype.diff = function (name) {
+    if (VARIABLES[this.index] === name) {
+        return ONE;
+    } else {
+        return ZERO;
+    }
+};
+
+Variable.prototype.postfix = Variable.prototype.prefix =
+    Variable.prototype.toString = function () {
+        return VARIABLES[this.index];
+    };
+
+
+let Add = GenerateOperation('+',
+    function (left, right) {
+        return left + right;
+    },
+    function (u, uDiff, v, vDiff) {
+        return new Add(uDiff, vDiff);
+    });
+
+let Subtract = GenerateOperation('-',
+    function (left, right) {
+        return left - right;
+    },
+    function (u, uDiff, v, vDiff) {
+        return new Subtract(uDiff, vDiff);
+    });
+
+let Multiply = GenerateOperation('*',
+    function (left, right) {
+        return left * right;
+    },
+    function (u, uDiff, v, vDiff) {
+        return new Add(new Multiply(u, vDiff), new Multiply(uDiff, v))
+    });
+
+let Divide = GenerateOperation('/',
+    function (left, right) {
+        return left / right;
+    },
+    function (u, uDiff, v, vDiff) {
+        return new Divide(new Subtract(new Multiply(uDiff, v), new Multiply(u, vDiff)), new Multiply(v, v));
+    });
+
+let Negate = GenerateOperation('negate',
+    function (operand) {
+        return -operand;
+    },
+    function (u, uDiff) {
+        return new Negate(uDiff);
+    });
+
+const Sum = GenerateOperation('sum',
+    (...operands) => {
+        let result = 0;
+        for (let operand of operands) {
+            result += operand;
+        }
+        return result;
+    },
+    (...operands) => {
+        let arguments = [];
+        for (let i = 1; i < operands.length; i += 2) {
+            arguments.push(operands[i]);
+        }
+        return new Sum(...arguments);
+    });
+
+const Sumexp = GenerateOperation('sumexp',
+    function(...operands) {
+        let result = 0;
+        for (let operand of operands) {
+            result += Math.pow(Math.E, operand);
+        }
+        return result;
+    },
+    function (...operands) {
+        let arguments = [];
+        for (let i = 1; i < operands.length; i += 2) {
+            arguments.push(new Multiply(operands[i], new Sumexp(operands[i - 1])));
+        }
+        return new Sum(...arguments);
+    });
+
+const Softmax = GenerateOperation('softmax',
+    function (...operands) {
+        let result = 0;
+        for (let operand of operands) {
+            result += Math.pow(Math.E, operand);
+        }
+        result = Math.pow(Math.E, operands[0]) / result;
+        return result;
+    },
+    function (...operands) {
+        let operandsx = [];
+        for (let i = 0; i < operands.length; i += 2) {
+            operandsx.push(operands[i]);
+        }
+
+        let operandsdx = [];
+        for (let i = 1; i < operands.length; i += 2) {
+            operandsdx.push(operands[i]);
+        }
+
+        let denominator = new Sumexp(...operandsx);
+        let numerator = new Sumexp(operandsx[0]);
+
+        let res = new Divide(numerator, denominator);
+        return res.calcDiff(numerator, numerator.calcDiff(operandsx[0], operandsdx[0]), denominator, denominator.calcDiff(...operands));
+    });
+let OPERATIONS = {
+    '+': [Add, 2],
+    '-': [Subtract, 2],
+    '*': [Multiply, 2],
+    '/': [Divide, 2],
+    'negate': [Negate, 1],
+    'sum': [Sum, null],
+    'sumexp': [Sumexp, null],
+    'softmax': [Softmax, null],
+};
+
+function ParserException(message, expr, index) {
+    if (expr === null) {
+        this.message = message;
+    } else {
+        this.message = message + " at index '" + index + "'\n'" + expr + "'\n";
+        for (let i = 0; i < index + 1; i++) {
+            this.message = this.message.concat("~");
+        }
+        this.message = this.message.concat("^\n");
+    }
+}
+
+ParserException.prototype = Object.create(Error.prototype);
+ParserException.prototype.name = "ParserException";
+ParserException.prototype.constructor = ParserException;
+
+function isDigit(c) {
+    return c >= '0' && c <= '9';
+
+}
+
+function isLetter(c) {
+    return c >= 'a' && c <= 'z';
+
+}
+
+function isNumber(expr, index) {
+    return (isDigit(expr[index])) ||
+        (expr[index] === '-' && index + 1 < expr.length && isDigit(expr[index + 1]));
+
+}
+
+function contain(first, second, shift) { // 'first' contains 'second' as substring starts on index equals shift
+    if (first.length - shift < second.length) {
+        return false;
+    }
+
+    for (let i = 0; i < second.length; i++) {
+        if (first[shift + i] !== second[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function getToken(expr, index) {
+    let startIndex = index;
+
+    if (isNumber(expr, index)) {
+        index++;
+        while (index < expr.length && isDigit(expr[index])) {
+            index++;
+        }
+        return [expr.substring(startIndex, index), index];
+    } else if (expr[index] === '(' || expr[index] === ')') {
+        return [expr[index], index + 1];
+    }
+
+    for (let operation in OPERATIONS) {
+        if (contain(expr, operation, index)) {
+            index += operation.length;
+            return [operation, index];
+        }
+    }
+
+    while (isLetter(expr[index]) || expr[index] === '_') {
+        index++;
+    }
+    let name = expr.substring(startIndex, index);
+    if (VARIABLES.indexOf(name) !== -1) {
+        return [name, index];
+    }
+
+    while (index < expr.length && expr[index] !== ' ') {
+        index++;
+    }
+
+    throw new ParserException("Unexpected token '" + expr.substring(startIndex, index) + "'", expr, startIndex);
+}
+
+function skipWhiteSpaces(expr, index) {
+    while (index !== expr.length && expr[index] === ' ') {
+        index++;
+    }
+    return index;
+}
+
+function parse(expr, parsingFunction) {
+    let index = 0;
+
+    expr = expr.trim();
+    if (expr === "") {
+        throw new ParserException("Empty input", null, 0);
+    }
+
+    let stack = [];
+    let balance = 0;
+    while (index !== expr.length) {
+        index = skipWhiteSpaces(expr, index);
+        let oldIndex = index;
+        let tokensInfo = getToken(expr, index);
+        let token = tokensInfo[0];
+        index = tokensInfo[1];
+
+        if (token === ')') {
+            if (--balance < 0) {
+                throw new ParserException("Expected \'(\', found \')\'", expr, index);
+            }
+
+            if (stack[stack.length - 1][0] === '(') {
+                throw new ParserException("Empty brackets", expr, stack[stack.length - 1][1]);
+            }
+
+            let result = parsingFunction(stack, oldIndex);
+            token = result[0];
+            let args = result[1];
+
+            if (args.length > OPERATIONS[token][1]) {
+                throw new ParserException("Too many arguments for operation \'" + token + "\'", expr, result[2]);
+            } else if (args.length < OPERATIONS[token][1]) {
+                throw new ParserException("Too less arguments for operation \'" + token + "\'", expr, result[2]);
+            }
+
+            stack.push([new OPERATIONS[token][0](...args), oldIndex]);
+        } else if (token === '(') {
+            balance++;
+            stack.push([token[0], oldIndex]);
+        } else if (token in OPERATIONS) {
+            stack.push([token, oldIndex]);
+        } else if (VARIABLES.indexOf(token) !== -1) {
+            stack.push([new Variable(token), oldIndex]);
+        } else if (isNumber(token, 0)) {
+            stack.push([new Const(parseInt(token)), oldIndex]);
+        }
+    }
+    if (balance !== 0) {
+        throw new ParserException("Missed closing bracket", expr, index);
+    }
+    if (stack.length !== 1) {
+        throw new ParserException("Extra argument out of brackets", null, 0);
+    }
+    return stack[0][0];
+}
+
+let parsePostfix = function (expr) {
+    return parse(expr,
+        function (stack, index) {
+            let operation = stack.pop();
+            if (!(operation[0] in OPERATIONS)) {
+                throw new ParserException("Expected operation, found \')\'", expr, index);
+            }
+
+            let args = [];
+            for (let i = 0; i < OPERATIONS[operation[0]][1] && stack[stack.length - 1][0] !== '('; i++) {
+                let element = stack.pop();
+                if (!(element[0] in OPERATIONS)) {
+                    args.push(element[0]);
+                } else {
+                    throw new ParserException("Two operations in one brackets", expr, element[1]);
+                }
+            }
+            args.reverse();
+            let currentBracket = stack.pop();
+            if (currentBracket[0] !== "(") {
+                throw new ParserException("Expected \'(\', found \'"
+                    + currentBracket[0].toString() + "\' operand", expr, currentBracket[1]);
+            }
+
+            return [operation[0], args, operation[1]];
+        });
+};
+
+let parsePrefix = function (expr) {
+    return parse(expr,
+        function (stack) {
+            let args = [];
+            while (!(stack[stack.length - 1][0] in OPERATIONS || stack[stack.length - 1][0] === '('))
+                args.push(stack.pop()[0]);
+            let operation = stack.pop();
+            args.reverse();
+
+            if (!(operation[0] in OPERATIONS)) {
+                throw new ParserException("Expecting operation after \'(\' not founded", expr, (stack.length !== 0 ? stack.pop()[1] : 0));
+            }
+
+            let currentBracket = stack.pop();
+            if (currentBracket[0] !== "(") {
+                throw new ParserException("Expected \'(\' before \'" + operation[0] + "\' operation", null, 0);
+            }
+
+            return [operation[0], args, operation[1]];
+        });
+};
