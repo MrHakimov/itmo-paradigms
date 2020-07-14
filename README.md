@@ -1,3 +1,9 @@
+# WARNING!
+This repository is public due to educational purposes. You are not allowed to copy this code unless mentioning its author. Note that it is under an appropriate license.
+
+### Attention! ITMO students currently or in future attending Java advanced course!
+* With high probability your submissions (solutions) will be tested for plagiarism. Do not copy code from this repository. This can lead to bad consequences - from lowering scores to reporting plagiarism to the student office with subsequent university expulsion. Be careful!
+
 # Тесты к курсу «Парадигмы программирования»
 
 [Условия домашних заданий](http://www.kgeorgiy.info/courses/paradigms/homeworks.html)
